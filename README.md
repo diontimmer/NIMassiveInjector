@@ -1,5 +1,6 @@
 # Massive Wavetable Injector 🎛️  
 **By Dion Timmer**
+![Massive Wavetable Injector](preview.png)
 
 ## Notice
 
