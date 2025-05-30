@@ -45,7 +45,7 @@ If your WAV doesn't match the slot size, the tool can:
 ## How to Use
 
 ### 🟢 Option 1: Download the Binary
-You can download a ready-to-run Windows executable from the Releases section.  
+You can download a ready-to-run Windows executable from the [Releases](https://github.com/diontimmer/NIMassiveInjector/releases) section.  
 Just unzip it, run it as Administrator, and you’re good to go.
 
 ### 🔧 Option 2: Run from Source
