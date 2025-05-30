@@ -56,7 +56,7 @@ Just unzip it, run it as Administrator, and you’re good to go.
    ```
 3. Run the tool:
    ```bash
-   python main.py
+   python massive_injector.py
    ```
 
 > You'll need to run as **Administrator** if `TABLES.DAT` is in Program Files.
