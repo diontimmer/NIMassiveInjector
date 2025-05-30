@@ -73,10 +73,10 @@ You can bundle everything into a single Windows executable using **PyInstaller**
 
 2. Build with:
    ```bash
-   pyinstaller --noconsole --onefile --icon=dtico3.ico main.py
+   pyinstaller massive_injector.spec
    ```
 
-This will produce a standalone `main.exe` in the `dist` folder.
+This will produce a standalone `massive_injector.exe` in the `dist` folder.
 
 ---
 
