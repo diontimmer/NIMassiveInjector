@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 DEFAULT_DIR = r"C:\Program Files (x86)\Common Files\Native Instruments\Massive"
+FRAME_SAMPLES = 2048  # default frame size in Massive (for interpolation)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -54,7 +56,7 @@ except Exception as exc:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# NIMD parser (unchanged)
+# NIMD parser
 # ════════════════════════════════════════════════════════════════════════════
 class _Entry:
     is_list = False  # type: ignore
@@ -143,23 +145,22 @@ class WavetableInjector(QWidget):
         icon_path = resource_path("dtico3.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        else:
-            print(f"[WARN] Icon not found: {icon_path}")
         self.resize(750, 900)
-        self.setMinimumSize(750, 900)
-        self.setMaximumSize(750, 900)
+        self.setFixedSize(750, 900)
+
+        # state ----------------------------------------------------------------
         self.tables_path: str | None = None
         self.backup_path: str | None = None
         self.index: "OrderedDict[str, Dict]" = OrderedDict()
         self.sort_key: str = "None"
         self.sort_desc: bool = False
 
+        # root layout -----------------------------------------------------------
         root_lay = QVBoxLayout(self)
 
         # ─── Top path chooser ──────────────────────────────────────────────
         top = QHBoxLayout()
-        self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("Select TABLES.DAT …")
+        self.path_edit = QLineEdit(placeholderText="Select TABLES.DAT …")
         self.path_edit.setReadOnly(True)
         top.addWidget(self.path_edit)
         browse = QPushButton("Browse")
@@ -179,7 +180,6 @@ class WavetableInjector(QWidget):
         self.desc_check.toggled.connect(self.on_desc_toggled)
         sort_bar.addWidget(self.desc_check)
 
-        # ─── Action buttons ───────────────────────────────────────────────
         self.export_btn = QPushButton("Export TABLES.DAT…")
         self.export_btn.setEnabled(False)
         self.export_btn.clicked.connect(self.export_tables)
@@ -193,9 +193,28 @@ class WavetableInjector(QWidget):
         sort_bar.addStretch()
         root_lay.addLayout(sort_bar)
 
-        # ─── Table ────────────────────────────────────────────────────────
-        self.table = QTableWidget()
-        self.table.setSelectionMode(QTableWidget.NoSelection)
+        # ─── NEW: processing options bar ───────────────────────────────────
+        opts_bar = QHBoxLayout()
+        self.interpolate_check = QCheckBox("Interpolate frames")
+        self.interpolate_check.setChecked(False)
+        opts_bar.addWidget(self.interpolate_check)
+
+        opts_bar.addSpacing(12)
+        opts_bar.addWidget(QLabel("Fade len:"))
+        self.fade_spin = QSpinBox()
+        self.fade_spin.setRange(2, FRAME_SAMPLES)
+        self.fade_spin.setValue(32)  # default
+        self.fade_spin.setSingleStep(2)
+        self.fade_spin.setEnabled(False)
+        opts_bar.addWidget(self.fade_spin)
+
+        # enable / disable spin-box together with the checkbox
+        self.interpolate_check.toggled.connect(self.fade_spin.setEnabled)
+        opts_bar.addStretch()
+        root_lay.addLayout(opts_bar)
+
+        # ─── Table view ────────────────────────────────────────────────────
+        self.table = QTableWidget(selectionMode=QTableWidget.NoSelection)
         root_lay.addWidget(self.table)
 
         if initial_tables:
@@ -456,6 +475,38 @@ class WavetableInjector(QWidget):
 
         return pcm_i16.tobytes()
 
+    @staticmethod
+    def _interpolate_frames(
+        pcm: bytes,
+        fade_len: int = 32,
+        frame_len: int = FRAME_SAMPLES,
+    ) -> bytes:
+        """
+        Cross-fade each frame’s tail into the next frame’s head.
+        pcm       : 16-bit little-endian mono bytes
+        fade_len  : #samples blended at each boundary
+        frame_len : Massive’s frame size (2 048)
+        """
+        if fade_len <= 0 or fade_len >= frame_len:
+            return pcm  # nothing to do
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+        total_frames = len(samples) // frame_len
+        if total_frames < 2:
+            return pcm  # single-frame table
+        w = np.linspace(0.0, 1.0, fade_len, endpoint=False, dtype=np.float32)
+        inv_w = 1.0 - w
+        for f in range(total_frames - 1):
+            a_start = f * frame_len + frame_len - fade_len
+            b_start = (f + 1) * frame_len
+            # blend - simple linear cross-fade
+            samples[a_start : a_start + fade_len] = (
+                samples[a_start : a_start + fade_len] * inv_w
+                + samples[b_start : b_start + fade_len] * w
+            )
+        # final clip / convert
+        samples = np.clip(samples, -32768, 32767).astype("<i2")
+        return samples.tobytes()
+
     # ─── size-mismatch helpers ──────────────────────────────────────
     def _loop_or_cut(self, pcm: bytes, needed_bytes: int) -> bytes:
         """Trim if too long, loop-repeat if too short."""
@@ -506,15 +557,23 @@ class WavetableInjector(QWidget):
             return
         try:
             pcm = self.pcm_from_wav(wav_path)
+
+            # optional frame interpolation ----------------------------------
+            if self.interpolate_check.isChecked():
+                fade = max(2, min(self.fade_spin.value(), FRAME_SAMPLES))
+                pcm = self._interpolate_frames(pcm, fade_len=fade)
+
             info = self.index[fname]
             if len(pcm) != info["pcm_size"]:
                 pcm = self._handle_mismatch(pcm, info["pcm_size"])
                 if pcm is None:
                     return
-            # write new PCM block
+
+            # write new PCM block -------------------------------------------
             with open(self.tables_path, "r+b") as fp:
                 fp.seek(info["byte_offset"])
                 fp.write(pcm)
+
             info["overridden"] = True
             self.table.setItem(row, 4, self._tick(True))
             QMessageBox.information(self, "Success", "Wavetable replaced!")

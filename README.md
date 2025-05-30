@@ -33,6 +33,7 @@
 When replacing a wavetable, it is **strongly recommended** that your input WAVs follow these specs:
 
 - 📈 **Same sample size** as the slot you're targeting (you’ll be prompted if not)
+- 🎵 **Wavetable Cycle Length** Import wavetable cycles of 2048 samples preferably
 - 🎚️ **Mono**
 - 🎧 **16-bit**
 - ⏱️ **44.1kHz sample rate**
@@ -40,6 +41,7 @@ When replacing a wavetable, it is **strongly recommended** that your input WAVs 
 If your WAV doesn't match the slot size, the tool can:
 - Loop or trim it to fit
 - Stretch it via linear resampling (changes pitch)
+- Merge channels if stereo to mono
 
 ---
 
